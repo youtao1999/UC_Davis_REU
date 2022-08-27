@@ -16,7 +16,7 @@ import numpy as np
 import matplotlib.pyplot as pl
 import matplotlib.ticker as mtick
 import os
-import shutil
+from scipy.stats import moment
 from matplotlib.animation import FuncAnimation
 import mpl_toolkits.axes_grid1
 import matplotlib.widgets
@@ -166,12 +166,24 @@ def test_plot(h_x_range, all_quantity, ylabel=None):
     pl.show()
 
 def coeff_extract():
-    table = np.loadtxt('series_d2.txt')
+    table = np.loadtxt('../series_d2.txt')
     chi_coeff = table[:, 1]
     E_coeff = table[:, 2]
     S_coeff = table[:, 3]
     # print(S_coeff)
     return chi_coeff, E_coeff, S_coeff
+
+def mom_coeff_extract():
+    table = np.loadtxt('chi_ii_mom-2d.txt', dtype = np.clongdouble)
+    table = table[:4*15, -1]
+    mom_coeffs = []
+    for i in range(4):
+        mom_coeffs.append(table[i*15: (i+1)*15])
+    return mom_coeffs
+
+def series_extract():
+    table = np.loadtxt('mu-sigma-skew-kurt.txt', dtype=np.clongdouble)
+    return table[:, 0], table[:, 1], table[:, 2], table[:, 3], table[:, 4]
 
 def expand(coeff_vec, h, max_order):
     result = 0.
@@ -179,6 +191,13 @@ def expand(coeff_vec, h, max_order):
     for i in range(max_order):
         result += coeff_vec[i]*(x**i)
     return result
+
+def mom_expand(h):
+    mom_coeffs = mom_coeff_extract()
+    mom_arr = np.zeros(4)
+    for m, series_coeff in enumerate(mom_coeffs):
+        mom_arr[m] = expand(series_coeff, h, 15)/(h**(m+1))
+    return mom_arr
 
 def h_x_expand(h_x_range, max_order):
     chi_coeff, E_coeff, S_coeff = coeff_extract()
@@ -364,6 +383,258 @@ def general_plot(directory_name, h_x_range, plot = True, distribution_animation=
 
     return ground_energy_all_size, first_energy_all_size, chi_arr_all_size, S_SG_arr_all_size, EE_arr_all_size
 
+def dist_moment(distribution, m):
+    n, bins = np.histogram(distribution, bins = len(distribution),density = False)
+    n = n/sum(n)
+    return np.dot(n, np.power(bins[:-1], m))
+
+def skew(distribution):
+    std = np.std(distribution, ddof=1)
+    first_moment = dist_moment(distribution, 1)
+    third_moment = dist_moment(distribution, 3)
+    return (third_moment - 3.*first_moment*std**2. - first_moment**3.)/std**3
+
+def kurtosis(distribution):
+    std = np.std(distribution, ddof=1)
+    [first_moment, second_moment, third_moment, fourth_moment] = [dist_moment(distribution, i+1) for i in range(4)]
+    return (fourth_moment - 4. * first_moment * third_moment + 6. * first_moment**2. * second_moment - 3. * first_moment**4.)/(std**4.)
+
+def mean_plot(directory_name, h_x_range):
+
+    listdir = os.listdir(directory_name)
+    size_list = [int(''.join(filter(str.isdigit, string))) for string in listdir]
+    mean_size = []
+    fig = pl.figure(figsize=(8, 6))
+    pl.rcParams['font.size'] = '18'
+    for i, file_name in enumerate(listdir):
+        chi_ii_arr = chi_ii_extract(file_name)
+        mean_size.append(np.mean(chi_ii_arr, axis = 1))
+        pl.plot(h_x_range, np.mean(chi_ii_arr, axis = 1), label = size_list[i])
+
+    h, series_mean_arr, _, _, _ = series_extract()
+    pl.plot(h, series_mean_arr, label='expansion result')
+    # output files
+    # check to see whether the output file already exists
+    dir_name = 'chi_ii_plots'
+    if os.path.isdir(dir_name):
+        os.chdir(dir_name)
+    else:
+        os.mkdir(dir_name)
+        os.chdir(dir_name)
+
+    pl.ylabel(r'$\mu$', fontsize=18)
+    pl.xlabel(r'$h_x/J$', fontsize=18)
+    pl.xticks(fontsize=18)
+    pl.yticks(fontsize=18)
+    pl.tick_params('both', length=7, width=2, which='major')
+    pl.tick_params('both', length=5, width=2, which='minor')
+    pl.grid(False)
+    fig.tight_layout(pad=0.5)
+    pl.xlim((0,4))
+    pl.yscale('log')
+    title = r'$\mu$ as a function of $h_x$'
+    pl.legend(loc=0, prop={'size': 16}, numpoints=1, scatterpoints=1, ncol=1)
+    pl.title(title)
+    pl.ioff()
+    pl.savefig("mean_vs_hx", bbox_inches='tight')
+    os.chdir('../')
+    return mean_size
+
+def std_plot(directory_name, h_x_range):
+
+    listdir = os.listdir(directory_name)
+    size_list = [int(''.join(filter(str.isdigit, string))) for string in listdir]
+    std_size = []
+    fig = pl.figure(figsize=(8, 6))
+    pl.rcParams['font.size'] = '18'
+    for i, file_name in enumerate(listdir):
+        chi_ii_arr = chi_ii_extract(file_name)
+        std_size.append(np.std(chi_ii_arr, axis = 1, ddof = 1))
+        pl.plot(h_x_range, np.std(chi_ii_arr, axis = 1, ddof = 1), label = size_list[i])
+
+    h, _, series_std_arr, _, _ = series_extract()
+    pl.plot(h, series_std_arr, label='expansion result')
+    # output files
+    # check to see whether the output file already exists
+    dir_name = 'chi_ii_plots'
+    if os.path.isdir(dir_name):
+        os.chdir(dir_name)
+    else:
+        os.mkdir(dir_name)
+        os.chdir(dir_name)
+
+    pl.ylabel(r'$\sigma$', fontsize=18)
+    pl.xlabel(r'$h_x/J$', fontsize=18)
+    pl.xticks(fontsize=18)
+    pl.yticks(fontsize=18)
+    pl.tick_params('both', length=7, width=2, which='major')
+    pl.tick_params('both', length=5, width=2, which='minor')
+    pl.grid(False)
+    pl.yscale('log')
+    fig.tight_layout(pad=0.5)
+    pl.xlim((0,4))
+    title = r'$\sigma$ as a function of $h_x$'
+    pl.legend(loc=0, prop={'size': 16}, numpoints=1, scatterpoints=1, ncol=1)
+    pl.title(title)
+    pl.ioff()
+    pl.savefig("std_vs_hx", bbox_inches='tight')
+    os.chdir('../')
+    return std_size
+
+def skew_plot(directory_name, h_x_range):
+
+    listdir = os.listdir(directory_name)
+    size_list = [int(''.join(filter(str.isdigit, string))) for string in listdir]
+    fig = pl.figure(figsize=(8, 6))
+    skew_size = []
+    pl.rcParams['font.size'] = '18'
+
+    h, _, _, series_skew_arr, _ = series_extract()
+
+    for i, file_name in enumerate(listdir):
+        chi_ii_arr = chi_ii_extract(file_name)
+        # skew_arr = np.zeros(len(h_x_range))
+        scipy_skew = np.zeros(len(h_x_range))
+        # skew_size.append(skew_arr)
+        for j, hx in enumerate(h_x_range):
+            # [first_moment, _, third_moment, _] = mom_expand(hx)
+            # std = np.std(chi_ii_arr[j])
+            # series_skew[j] = (third_moment - 3.*first_moment*std**2. - first_moment**3.)/std**3
+            # print(np.shape(chi_ii_arr))
+            # skew_arr[j] = skew(chi_ii_arr[j])
+            scipy_skew[j] = scipy.stats.skew(chi_ii_arr[j])
+        # pl.plot(h_x_range, skew_arr, label = size_list[i])
+        pl.plot(h_x_range, scipy_skew, label = size_list[i])
+    pl.plot(h, series_skew_arr, label = 'expansion result')
+
+    # output files
+    # check to see whether the output file already exists
+    dir_name = 'chi_ii_plots'
+    if os.path.isdir(dir_name):
+        os.chdir(dir_name)
+    else:
+        os.mkdir(dir_name)
+        os.chdir(dir_name)
+
+    pl.ylabel(r'skew', fontsize=18)
+    pl.xlabel(r'$h_x/J$', fontsize=18)
+    pl.xticks(fontsize=18)
+    pl.yticks(fontsize=18)
+    # pl.ylim(bottom = -10., top = 10.)
+    pl.tick_params('both', length=7, width=2, which='major')
+    pl.tick_params('both', length=5, width=2, which='minor')
+    pl.grid(False)
+    pl.yscale('log')
+    pl.ylim(bottom = 0., top = 2.5)
+    pl.xlim((2., 10))
+    fig.tight_layout(pad=0.5)
+    title = r'skew as a function of $h_x$'
+    pl.legend(loc=0, prop={'size': 16}, numpoints=1, scatterpoints=1, ncol=1)
+    pl.title(title)
+    pl.ioff()
+    pl.savefig("skew_vs_hx", bbox_inches='tight')
+    os.chdir('../')
+    return skew_size
+
+def kurt_plot(directory_name, h_x_range):
+    listdir = os.listdir(directory_name)
+    size_list = [int(''.join(filter(str.isdigit, string))) for string in listdir]
+    fig = pl.figure(figsize=(8, 6))
+    pl.rcParams['font.size'] = '18'
+
+    h, _, _, _, series_kurt_arr = series_extract()
+
+    for i, file_name in enumerate(listdir):
+        chi_ii_arr = chi_ii_extract(file_name)
+        scipy_kurt = np.zeros(len(h_x_range))
+        # skew_size.append(skew_arr)
+        for j, hx in enumerate(h_x_range):
+            scipy_kurt[j] = scipy.stats.kurtosis(chi_ii_arr[j])
+        # pl.plot(h_x_range, skew_arr, label = size_list[i])
+        pl.plot(h_x_range, scipy_kurt, label=size_list[i])
+    pl.plot(h, series_kurt_arr, label='expansion result')
+
+    # output files
+    # check to see whether the output file already exists
+    dir_name = 'chi_ii_plots'
+    if os.path.isdir(dir_name):
+        os.chdir(dir_name)
+    else:
+        os.mkdir(dir_name)
+        os.chdir(dir_name)
+
+    pl.ylabel(r'kurtosis', fontsize=18)
+    pl.xlabel(r'$h_x/J$', fontsize=18)
+    pl.xticks(fontsize=18)
+    pl.yticks(fontsize=18)
+    pl.ylim(bottom=-10., top=50.)
+    # pl.xlim((0.,6.))
+    pl.tick_params('both', length=7, width=2, which='major')
+    pl.tick_params('both', length=5, width=2, which='minor')
+    pl.grid(False)
+    # pl.yscale('log')
+    pl.ylim((-2., 10.))
+    pl.xlim((4, 10))
+    fig.tight_layout(pad=0.5)
+    title = r'kurtosis as a function of $h_x$'
+    pl.legend(loc=0, prop={'size': 16}, numpoints=1, scatterpoints=1, ncol=1)
+    pl.title(title)
+    pl.ioff()
+    pl.savefig("kurt_vs_hx", bbox_inches='tight')
+    os.chdir('../')
+
+def lognorm_var(distribution):
+    return np.std(np.log(distribution))**2.
+
+def lognorm_variance_plot(directory_name, h_x_range):
+    listdir = os.listdir(directory_name)
+    size_list = [int(''.join(filter(str.isdigit, string))) for string in listdir]
+    fig = pl.figure(figsize=(8, 6))
+    pl.rcParams['font.size'] = '18'
+
+    for i, file_name in enumerate(listdir):
+        chi_ii_arr = chi_ii_extract(file_name)
+        scipy_var = np.zeros(len(h_x_range))
+        # skew_size.append(skew_arr)
+        for j, hx in enumerate(h_x_range):
+            scipy_var[j] = lognorm_var(chi_ii_arr[j])
+        pl.plot(h_x_range, scipy_var, label=size_list[i])
+
+    # plot series expansion results
+    series_var = np.zeros(len(h_x_range))
+    for j, hx in enumerate(h_x_range):
+        [first, second, third, fourth] = mom_expand(hx)
+        var = second - first**2
+        series_var[j] = np.log(var/first**2+1)
+    pl.plot(h_x_range, series_var, label='expansion result')
+    # output files
+    # check to see whether the output file already exists
+    dir_name = 'chi_ii_plots'
+    if os.path.isdir(dir_name):
+        os.chdir(dir_name)
+    else:
+        os.mkdir(dir_name)
+        os.chdir(dir_name)
+
+    pl.ylabel(r'lognorm variance', fontsize=18)
+    pl.xlabel(r'$h_x/J$', fontsize=18)
+    pl.xticks(fontsize=18)
+    pl.yticks(fontsize=18)
+    pl.ylim(bottom=-5., top=5.)
+    # pl.xlim((0.,6.))
+    pl.tick_params('both', length=7, width=2, which='major')
+    pl.tick_params('both', length=5, width=2, which='minor')
+    pl.grid(False)
+    # pl.yscale('log')
+    pl.xlim((0, 4))
+    fig.tight_layout(pad=0.5)
+    title = r'lognormal variance as a function of $h_x$'
+    pl.legend(loc=0, prop={'size': 16}, numpoints=1, scatterpoints=1, ncol=1)
+    pl.title(title)
+    pl.ioff()
+    pl.savefig("lognorm_vs_hx", bbox_inches='tight')
+    os.chdir('../')
+
 def chi_ii_hist(directory_name, h_x_index, plot = True):
     '''
     This function reads all the data_all files and directly outputs the plots
@@ -404,7 +675,8 @@ def chi_ii_hist(directory_name, h_x_index, plot = True):
             for i in range(len(size_list)):
                 chi_ii_hist = chi_ii_size[i]
                 hist = np.append(hist, chi_ii_hist[h_x_index, :])
-            [mean, std] = scipy.stats.norm.fit(hist)
+            mean = np.mean(hist)
+            std = np.std(hist, ddof = 1)
             x = np.linspace(min(bins), max(bins))
             pl.plot(x, scipy.stats.norm.pdf(x, mean, std), label='normal')
         else:
@@ -413,7 +685,12 @@ def chi_ii_hist(directory_name, h_x_index, plot = True):
                 chi_ii_hist = chi_ii_size[i]
                 hist = np.append(hist, chi_ii_hist[h_x_index, :])
             n, bins, patches = pl.hist(hist, density=True)
-            [mean, std] = scipy.stats.norm.fit(hist)
+            txt = 'computed moments: {calc_mom} \n series moments: {series_mom}'.format(calc_mom = [dist_moment(hist, m+1) for m in range(4)], series_mom = mom_expand(h_x_range[h_x_index]))
+            # txt = 'computed moments: {calc_mom} \n series moments: {series_mom}'.format(calc_mom = [scipy.stats.moment(hist, m+1) for m in range(4)], series_mom = mom_expand(h_x_range[h_x_index]))
+            # compare skew and kurtosis for large hx values, lognorm for small hx values
+            pl.figtext(0.5, -0.1, txt, wrap=True, horizontalalignment='center', fontsize=12)
+            mean = np.mean(hist)
+            std = np.std(hist, ddof=1)
             x = np.linspace(min(bins), max(bins))
             pl.plot(x, scipy.stats.norm.pdf(x, mean, std), label = 'normal')
 
@@ -442,5 +719,11 @@ num_steps = 50
 h_x_range = np.concatenate((np.linspace(init, final, num_steps), np.linspace(final+0.5, final+6., 5)))
 
 # if __name__ == '__main__':
-#     for h_x_index in range(len(h_x_range)):
-#         chi_ii_hist('chi_ii_prob', h_x_index)
+#     # for h_x_index in range(len(h_x_range)):
+#     #     chi_ii_hist('chi_ii_prob', h_x_index)
+#     # mean_plot('chi_ii_prob', h_x_range)
+#     # skew_plot('chi_ii_prob', h_x_range)
+#     # kurt_plot('chi_ii_prob', h_x_range)
+#     # std_plot('chi_ii_prob', h_x_range)
+#     # lognorm_variance_plot('chi_ii_prob', h_x_range)
+#     general_plot('multiprocessing_test_output',h_x_range)

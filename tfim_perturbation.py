@@ -11,6 +11,7 @@ import numpy as np
 from scipy.linalg import eigh
 from scipy import sparse
 from scipy.sparse import linalg as spla
+import networkx as nx
 
 
 ###############################################################################
@@ -35,10 +36,40 @@ def judge(order, array, N):
     if array[np.nonzero(array <= N/2.0)] != []:
         return np.max(array[np.nonzero(array <= N/2.0)]) <= order
 
-def minOrder(order, array, N):
-    # if this function returns true, then this instance is a threshold instance for which our perturbation expansion is non-trivial
-    if array[np.nonzero(array <= N/2.0)] != []:
-        return np.min(array[np.nonzero(array <= N/2.0)]) == order
+# def minOrder(order, array, N):
+#     # if this function returns true, then this instance is a threshold instance for which our perturbation expansion is non-trivial
+#     if array[np.nonzero(array <= N/2.0)] != []:
+#         return np.min(array[np.nonzero(array <= N/2.0)]) == order
+
+
+def min_order(basis, GS_indices):
+    '''
+    This function returns the minimum order needed in the perturbative expansion in order to connect the ground manifold.
+    Note that by taking advantage of the spin-inversion symmetry, we relax the criterion for the ground manifold being
+    connected to maxium two disconnected components which are spin-inversion of each other. We then can artificially
+    construct the equal superposition in the wavefunction. Thus the minimum order needed is the one such that the ground
+    manifold is reduced to two spin-inversion components of each other.
+    '''
+
+    def order_GS_graph(basis, GS_indices, order):
+        Hamming_matrix = np.zeros((len(GS_indices), len(GS_indices)))
+        for i in range(len(GS_indices)):
+            for j in range(i + 1, len(GS_indices)):
+                GS_index_1 = GS_indices[i]
+                GS_index_2 = GS_indices[j]
+                if Hamming_distance(basis.state(GS_index_1), basis.state(GS_index_2)) <= order:
+                    Hamming_matrix[i, j] += 1
+        Hamming_matrix += Hamming_matrix.T
+        return nx.from_numpy_matrix(Hamming_matrix)
+
+    # Construct graph
+    order = 0
+    G = order_GS_graph(basis, GS_indices, order)
+    while nx.number_connected_components(G) > 2:
+        order += 1
+        G = order_GS_graph(basis, GS_indices, order)
+
+    return order
     
 ###############################################################################
 
