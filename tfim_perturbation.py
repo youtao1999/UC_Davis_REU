@@ -7,6 +7,7 @@
     --Requires: numpy, scipy.sparse, scipy.linalg, progressbar
 """
 import tfim_matrices as tfim_matrices
+import tfim
 import numpy as np
 from scipy.linalg import eigh
 from scipy import sparse
@@ -210,22 +211,22 @@ def H_app_3(basis, Jij, GS_indices, N, GS_energy):
             basis.flip(state_0, i)
     return H_app_3
 
-def H_app_1st(h_x, H_0, V, J):
+def H_app_1st(h_x, H_0, V):
     # Calculate final 1st order
     return H_0 - h_x*V
 
-def H_app_2nd(h_x, H_0, V, H_2, J):
+def H_app_2nd(h_x, H_0, V, H_2):
     # Calculate final 2nd order approximated matrix
     c_2 = h_x**2
     return H_0 - h_x*V + H_2*c_2
 
-def H_app_3rd(h_x, H_0, V, H_2, H_3, J):
+def H_app_3rd(h_x, H_0, V, H_2, H_3):
     # Calculate final 3rd approximated matrix
     c_2 = h_x**2
     c_3 = h_x**3
     return H_0 - h_x*V + H_2*c_2 - H_3*c_3
 
-def H_app_4th(h_x, H_0, V, H_2, H_3, H_4, J):
+def H_app_4th(h_x, H_0, V, H_2, H_3, H_4):
     # Calculate final 3rd approximated matrix
     c_2 = h_x**2
     c_3 = h_x**3
@@ -401,7 +402,7 @@ def app_4_eigensystem_general_matrices(GS_indices, GS_energy, h_x_range, J, N, b
     H_app_4 = 0.5*(tfim_matrices.hc(PVQ1 @ EGM_13 @ Q1VP @ PVP @ PVP)) - 0.5*(tfim_matrices.hc(PVQ1 @ EGM_12 @ Q1VP @ PVQ1 @ EGM_11 @ Q1VP)) - 1.*(tfim_matrices.hc(PVQ1 @ EGM_11 @ Q1VQ1 @ EGM_12 @ Q1VP @ PVP)) + 1.*(PVQ1 @ EGM_11 @ Q1VQ2 @ EGM_21 @ Q2VQ1 @ EGM_11 @ Q1VP)
 
     for j, h_x in enumerate(h_x_range):
-        app_eigenvalue, app_eigenstate = eigh(H_app_4th(h_x, H_0, H_app_1, H_app_2, H_app_3, H_app_4, J));
+        app_eigenvalue, app_eigenstate = eigh(H_app_4th(h_x, H_0, H_app_1, H_app_2, H_app_3, H_app_4));
         for i in range(len(GS_indices)):
             app_eigenvalues[i][j] = app_eigenvalue[i]
             for k in range(len(GS_indices)):
@@ -625,7 +626,7 @@ def Jij_2D_NN(seed, N, PBC, xwidth, yheight, lattice):
 
     Jij = make_Jij(N, b_list, lattice)
 
-    return Jij_convert(Jij, N)
+    return Jij_convert(Jij, N), Jij
 
 
 def eight_tile(seed, p):
@@ -663,6 +664,22 @@ def ten_tile(seed, p):
         Jij[pos[1]-1,pos[0]-1] += a[i]
     N = 10
     return Jij, N
+
+###############################################################################
+# the following functions enables susceptibility calculation using perturbation theory
+
+def sigma_z_0(a, input_state_indices, basis):
+    '''
+    Builds Pauli spin z matrix for the a-th spin, projected onto the ground subspace
+    '''
+    sigma_z_a = np.zeros(len(input_state_indices))
+    for state_index, ket in enumerate(input_state_indices):
+        state = basis.state(ket)
+        if state[a] == 1:
+            sigma_z_a[state_index] += 1
+        else:
+            sigma_z_a[state_index] -= 1
+    return sigma_z_a
 
 
 def susceptibility(h_x_range, lattice, basis, exc_eigenvalues, H_0_exc, V_exc, v0, h_z):
@@ -731,4 +748,434 @@ def susceptibility(h_x_range, lattice, basis, exc_eigenvalues, H_0_exc, V_exc, v
 
     return chi_arr, order_param_arr
 
+def energy_gap_longitudinal_1(a, basis, Jij, lower_excitation_states, higher_excitation_states, exponent, h_z):
+    energy_gap = np.zeros((len(lower_excitation_states), len(higher_excitation_states)))
+    sigma_high = sigma_z_0(a, higher_excitation_states, basis)
+    sigma_low = sigma_z_0(a, lower_excitation_states, basis)
+    for i, lower_state_index in enumerate(lower_excitation_states):
+        for j, higher_state_index in enumerate(higher_excitation_states):
+            longitudinal_field_lower = - h_z * sigma_low[i]
+            longitudinal_field_higher = - h_z * sigma_high[j]
+            ground_energy = state_energy(basis, Jij, lower_state_index) + longitudinal_field_lower
+            excited_energy = state_energy(basis, Jij, higher_state_index) + longitudinal_field_higher
+            energy_gap[i, j] = 1./(ground_energy - excited_energy) ** exponent
+    return energy_gap
 
+def energy_gap_longitudinal_2(a, b, basis, Jij, lower_excitation_states, higher_excitation_states, exponent, h_z):
+    energy_gap = np.zeros((len(lower_excitation_states), len(higher_excitation_states)))
+    sigma_high_a = sigma_z_0(a, higher_excitation_states, basis)
+    sigma_low_a = sigma_z_0(a, lower_excitation_states, basis)
+    sigma_high_b = sigma_z_0(b, higher_excitation_states, basis)
+    sigma_low_b = sigma_z_0(b, lower_excitation_states, basis)
+    for i, lower_state_index in enumerate(lower_excitation_states):
+        for j, higher_state_index in enumerate(higher_excitation_states):
+            longitudinal_field_lower = - h_z * (sigma_low_a[i] + sigma_low_b[i])
+            longitudinal_field_higher = - h_z * (sigma_high_a[j] + sigma_high_b[j])
+            ground_energy = state_energy(basis, Jij, lower_state_index) + longitudinal_field_lower
+            excited_energy = state_energy(basis, Jij, higher_state_index) + longitudinal_field_higher
+            energy_gap[i, j] = 1./(ground_energy - excited_energy) ** exponent
+    return energy_gap
+
+def fourth_order_last_term_single(a, basis, Jij, GS_indices, ES_1_indices, ES_2_indices, N, h_z):
+    H = np.zeros((len(GS_indices), len(GS_indices)))
+    for column, GS_bra_1 in enumerate(GS_indices):
+        state_0 = basis.state(GS_bra_1)
+        sigma_0 = sigma_z_0(a, GS_indices, basis)
+        LE = state_energy(basis, Jij, GS_bra_1) - h_z * sigma_0[column]
+        for i in range(N):
+            basis.flip(state_0, i)
+            state_1_index = basis.index(state_0)
+            if state_1_index in ES_1_indices:
+                sigma_1 = sigma_z_0(a, ES_1_indices, basis)
+                HE = state_energy(basis, Jij, state_1_index) - h_z * sigma_1[np.argwhere(ES_1_indices == state_1_index)]
+                EG_1 = LE - HE
+                for j in range(N):
+                    basis.flip(state_0, j)
+                    state_2_index = basis.index(state_0)
+                    if state_2_index in ES_2_indices:
+                        sigma_2 = sigma_z_0(a, ES_2_indices, basis)
+                        HE = state_energy(basis, Jij, state_2_index) - h_z * sigma_2[np.argwhere(ES_2_indices == state_2_index)]
+                        EG_2 = LE - HE
+                        for k in range(N):
+                            basis.flip(state_0, k)
+                            state_3_index = basis.index(state_0)
+                            if state_3_index in ES_1_indices:
+                                HE = state_energy(basis, Jij, state_3_index) - h_z * sigma_1[np.argwhere(ES_1_indices == state_3_index)]
+                                EG_3 = LE - HE
+                                for l in range(N):
+                                    basis.flip(state_0, l)
+                                    state_4_index = basis.index(state_0)
+                                    if state_4_index in GS_indices:
+                                        row = np.argwhere(np.array(GS_indices) == state_4_index)[0][0]
+                                        H[row, column] += 1./(EG_1 * EG_2 * EG_3)
+                                    basis.flip(state_0, l)
+                            basis.flip(state_0, k)
+                    basis.flip(state_0, j)
+            basis.flip(state_0, i)
+    return H
+
+def fourth_order_last_term_double(a, b, basis, Jij, GS_indices, ES_1_indices, ES_2_indices, N, h_z):
+    H = np.zeros((len(GS_indices), len(GS_indices)))
+    for column, GS_bra_1 in enumerate(GS_indices):
+        state_0 = basis.state(GS_bra_1)
+        sigma_0_a = sigma_z_0(a, GS_indices, basis)
+        sigma_0_b = sigma_z_0(b, GS_indices, basis)
+        LE = state_energy(basis, Jij, GS_bra_1) - h_z * (sigma_0_a + sigma_0_b)[column]
+        for i in range(N):
+            basis.flip(state_0, i)
+            state_1_index = basis.index(state_0)
+            if state_1_index in ES_1_indices:
+                sigma_1_a = sigma_z_0(a, ES_1_indices, basis)
+                sigma_1_b = sigma_z_0(b, ES_1_indices, basis)
+                HE = state_energy(basis, Jij, state_1_index) - h_z * (sigma_1_a + sigma_1_b)[np.argwhere(ES_1_indices == state_1_index)]
+                EG_1 = LE - HE
+                for j in range(N):
+                    basis.flip(state_0, j)
+                    state_2_index = basis.index(state_0)
+                    if state_2_index in ES_2_indices:
+                        sigma_2_a = sigma_z_0(a, ES_2_indices, basis)
+                        sigma_2_b = sigma_z_0(b, ES_2_indices, basis)
+                        HE = state_energy(basis, Jij, state_2_index) - h_z * (sigma_2_a + sigma_2_b)[np.argwhere(ES_2_indices == state_2_index)]
+                        EG_2 = LE - HE
+                        for k in range(N):
+                            basis.flip(state_0, k)
+                            state_3_index = basis.index(state_0)
+                            if state_3_index in ES_1_indices:
+                                HE = state_energy(basis, Jij, state_3_index) - h_z * (sigma_1_a + sigma_1_b)[np.argwhere(ES_1_indices == state_3_index)]
+                                EG_3 = LE - HE
+                                for l in range(N):
+                                    basis.flip(state_0, l)
+                                    state_4_index = basis.index(state_0)
+                                    if state_4_index in GS_indices:
+                                        row = np.argwhere(np.array(GS_indices) == state_4_index)[0][0]
+                                        H[row, column] += 1./(EG_1 * EG_2 * EG_3)
+                                    basis.flip(state_0, l)
+                            basis.flip(state_0, k)
+                    basis.flip(state_0, j)
+            basis.flip(state_0, i)
+    return H
+
+def perturb_susceptibility(h_x_range, L, PBC, Jij, GS_indices, h_z):
+    '''
+    calculates spin glass susceptibility at low perturbation using perturbation theory, projected fast algorithm but lacking benchmark; like entanglement entropy,
+    this algorithm should only be used for low perturbations.
+    '''
+    # initiating output array
+    chi_arr_all = []
+    order_param_all = []
+
+    lattice = tfim.Lattice(L, PBC)
+    N = lattice.N
+    basis = tfim.IsingBasis(lattice)
+    GS_energy = state_energy(basis, Jij, GS_indices[0])
+
+    #########################################################################
+
+    # construct building blocks
+    ES_1_indices = tfim_matrices.Hamming_set(basis, GS_indices, N, GS_indices)
+    ES_2_indices = tfim_matrices.Hamming_set(basis, ES_1_indices, N, GS_indices)
+
+    # Building blocks matrices
+    PVP = tfim_matrices.PVP(basis, GS_indices, N)
+    PVQ1 = tfim_matrices.PVQ_1(basis, GS_indices, ES_1_indices, N)
+    Q1VP = np.transpose(PVQ1)
+    Q1VQ1 = tfim_matrices.Q_1VQ_1(basis, ES_1_indices, GS_indices, N)
+    Q1VQ2 = tfim_matrices.Q_1VQ_2(basis, ES_2_indices, ES_1_indices, GS_indices, N)
+    Q2VQ1 = np.transpose(Q1VQ2)
+
+    # energy_gap_matrix_12 (EGM) denotes 1/(E_0-QH_0Q)^2 from Q1 to Q1
+    EGM_12 = tfim_matrices.energy_gap(basis, Jij, ES_1_indices, GS_energy, 2)
+    EGM_13 = tfim_matrices.energy_gap(basis, Jij, ES_1_indices, GS_energy, 3)
+    EGM_11 = tfim_matrices.energy_gap(basis, Jij, ES_1_indices, GS_energy, 1)
+    EGM_21 = tfim_matrices.energy_gap(basis, Jij, ES_2_indices, GS_energy, 1)
+
+    # Start building Hamiltonians
+
+    H_0 = H_app_0(GS_energy, GS_indices)
+    H_app_1 = PVP
+    H_app_2 = PVQ1 @ EGM_11 @ Q1VP
+    H_app_3 = -0.5 * (PVP @ PVQ1 @ EGM_12 @ Q1VP + np.transpose(
+        PVP @ PVQ1 @ EGM_12 @ Q1VP)) + PVQ1 @ EGM_11 @ Q1VQ1 @ EGM_11 @ Q1VP
+    H_app_4 = 0.5 * (tfim_matrices.hc(PVQ1 @ EGM_13 @ Q1VP @ PVP @ PVP)) - 0.5 * (
+        tfim_matrices.hc(PVQ1 @ EGM_12 @ Q1VP @ PVQ1 @ EGM_11 @ Q1VP)) - 1. * (
+                  tfim_matrices.hc(PVQ1 @ EGM_11 @ Q1VQ1 @ EGM_12 @ Q1VP @ PVP)) + 1. * (
+                          PVQ1 @ EGM_11 @ Q1VQ2 @ EGM_21 @ Q2VQ1 @ EGM_11 @ Q1VP)
+
+##############################################################################
+    # construct connectivity matrix
+    conn_matrix = H_0 + H_app_1 + H_app_2 + H_app_3 + H_app_4
+    adj_matrix = np.zeros(np.shape(conn_matrix))
+    for m in range(len(GS_indices)):
+        for n in range(len(GS_indices)):
+            if conn_matrix[m, n] != 0.:
+                adj_matrix[m, n] = 1
+    G = nx.from_numpy_matrix(adj_matrix)
+    connectivity = nx.is_connected(G)
+    print("number of ground states: ", len(GS_indices), 'connected:', connectivity)
+##############################################################################
+
+    chi_arr = np.zeros(len(h_x_range))
+    order_param_arr = np.zeros(len(h_x_range))
+    if connectivity:
+        for l, h_x in enumerate(h_x_range):
+            # E0 is the original ground energy without applying the longitudinal field
+            E0 = eigh(H_app_4th(h_x, H_0, H_app_1, H_app_2, H_app_3, H_app_4), eigvals_only = True)[0]
+
+            # calculate chi_aa
+            chi_aa_matrix = np.zeros(lattice.N)
+            order_param_matrix = np.zeros(lattice.N)
+            for a in range(N):
+                '''
+                recalculate effective Hamiltonian as the longitudinal field has caused Ising energy splitting
+                '''
+
+                # energy_gap_matrix_12 (EGM) denotes 1/(E_0-QH_0Q)^2 from Q1 to Q1
+                EGM_12 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_1_indices, 2, h_z)
+                EGM_13 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_1_indices, 3, h_z)
+                EGM_11 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_1_indices, 1, h_z)
+                EGM_21 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_2_indices, 1, h_z)
+
+                # Start building Hamiltonians
+
+                H_0 = H_app_0(GS_energy, GS_indices)
+                H_app_1 = PVP
+                H_app_2 = (PVQ1 * EGM_11) @ Q1VP
+                H_app_3 = -0.5 * (PVP @ (PVQ1 * EGM_12) @ Q1VP + np.transpose(
+                    PVP @ (PVQ1 * EGM_12) @ Q1VP)) + (PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_11.T * Q1VP)
+                H_app_4 = 0.5 * (tfim_matrices.hc((PVQ1 * EGM_13) @ Q1VP @ PVP @ PVP)) - 0.5 * (
+                    tfim_matrices.hc((PVQ1 * EGM_12) @ Q1VP @ (PVQ1 * EGM_11) @ Q1VP)) - 1. * (tfim_matrices.hc((PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_12.T * Q1VP) @ PVP)) + fourth_order_last_term_single(a, basis, Jij, GS_indices, ES_1_indices, ES_2_indices, N)
+
+                # build Pauli matrices
+                sigma_z_a = sigma_z_0(a, GS_indices, basis)
+
+                # calculating susceptibility
+                E1 = eigh(H_app_4th(h_x, H_0 - h_z * sigma_z_a, H_app_1, H_app_2, H_app_3, H_app_4), eigvals_only = True)[0]
+                E2 = eigh(H_app_4th(h_x, H_0 - 2. * h_z * sigma_z_a, H_app_1, H_app_2, H_app_3, H_app_4), eigvals_only = True)[0]
+                order_param = (E2 - 4. * E1 + 3. * E0) / (-2. * h_z)
+                order_param_matrix[a] = order_param
+                chi_aa = 2 * (E2 - 2. * E1 + E0) / (2 * h_z ** 2.)
+                chi_aa_matrix[a] = chi_aa
+                print('chi_aa_matrix ', a, 'completed')
+            # calculate chi_ab
+            chi_ab_matrix = np.zeros((lattice.N, lattice.N))
+            for a in range(lattice.N):
+                for b in range(a + 1, lattice.N, 1):
+                    '''
+                    recalculate effective Hamiltonian as the longitudinal field has caused Ising energy splitting
+                    '''
+                    # energy_gap_matrix_12 (EGM) denotes 1/(E_0-QH_0Q)^2 from Q1 to Q1
+                    EGM_12 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_1_indices, 2, h_z)
+                    EGM_13 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_1_indices, 3, h_z)
+                    EGM_11 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_1_indices, 1, h_z)
+                    EGM_21 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_2_indices, 1, h_z)
+
+                    # Start building Hamiltonians
+
+                    H_0 = H_app_0(GS_energy, GS_indices)
+                    H_app_1 = PVP
+                    H_app_2 = (PVQ1 * EGM_11) @ Q1VP
+                    H_app_3 = -0.5 * (PVP @ (PVQ1 * EGM_12) @ Q1VP + np.transpose(
+                    PVP @ (PVQ1 * EGM_12) @ Q1VP)) + (PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_11.T * Q1VP)
+                    H_app_4 = 0.5 * (tfim_matrices.hc((PVQ1 * EGM_13) @ Q1VP @ PVP @ PVP)) - 0.5 * (
+                        tfim_matrices.hc((PVQ1 * EGM_12) @ Q1VP @ (PVQ1 * EGM_11) @ Q1VP)) - 1. * (tfim_matrices.hc((PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_12.T * Q1VP) @ PVP)) + fourth_order_last_term_double(a, b, basis, Jij, GS_indices, ES_1_indices, ES_2_indices, N, h_z)
+
+                    # build Pauli matrices
+                    sigma_z_a = sigma_z_0(a, GS_indices, basis)
+                    sigma_z_b = sigma_z_0(b, GS_indices, basis)
+
+                    # calculating suscepbility
+                    H1 = H_app_4th(h_x, H_0 - h_z * (np.diag(sigma_z_a + sigma_z_b)), H_app_1, H_app_2, H_app_3, H_app_4)
+                    H2 = H_app_4th(h_x, H_0 - 2. * h_z * (np.diag(sigma_z_a + sigma_z_b)), H_app_1, H_app_2, H_app_3, H_app_4)
+                    E1 = eigh(H1, eigvals_only = True)[0]
+                    E2 = eigh(H2, eigvals_only = True)[0]
+                    chi_ab = (E2 - 2. * E1 + E0) / (2 * (h_z ** 2.)) - 0.5 * (chi_aa_matrix[a] + chi_aa_matrix[b])
+                    chi_ab_matrix[a, b] = chi_ab
+                    chi_ab_matrix[b, a] = chi_ab
+
+                    print('chi_ab ', a, b, 'completed')
+
+            # adding the diagonal elements
+            for c in range(lattice.N):
+                chi_ab_matrix[c, c] = chi_aa_matrix[c]
+
+            print('h_x = ', h_x, 'completed')
+
+            chi, order_param = np.sum(np.power(chi_ab_matrix, 2.)), abs(np.sum(order_param_matrix))
+            chi_arr[l] = chi
+            order_param_arr[l] = order_param
+
+    else:
+        C = max(nx.connected_components(G))
+        S = G.subgraph(C)
+        for l, h_x in enumerate(h_x_range):
+            # E0 is the original ground energy without applying the longitudinal field
+            E0 = eigh(H_app_4th(h_x, H_0, H_app_1, H_app_2, H_app_3, H_app_4), eigvals_only = True)[0]
+            # calculate chi_aa
+            chi_aa_matrix = np.zeros(lattice.N)
+            order_param_matrix = np.zeros(lattice.N)
+            for a in range(N):
+                '''
+                recalculate effective Hamiltonian as the longitudinal field has caused Ising energy splitting
+                '''
+                # energy_gap_matrix_12 (EGM) denotes 1/(E_0-QH_0Q)^2 from Q1 to Q1
+                EGM_12 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_1_indices, 2, h_z)
+                EGM_13 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_1_indices, 3, h_z)
+                EGM_11 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_1_indices, 1, h_z)
+                EGM_21 = energy_gap_longitudinal_1(a, basis, Jij, GS_indices, ES_2_indices, 1, h_z)
+
+                # Start building Hamiltonians
+
+                H_0 = H_app_0(GS_energy, GS_indices)
+                H_app_1 = PVP
+                H_app_2 = (PVQ1 * EGM_11) @ Q1VP
+                H_app_3 = -0.5 * (PVP @ (PVQ1 * EGM_12) @ Q1VP + np.transpose(
+                    PVP @ (PVQ1 * EGM_12) @ Q1VP)) + (PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_11.T * Q1VP)
+                H_app_4 = 0.5 * (tfim_matrices.hc((PVQ1 * EGM_13) @ Q1VP @ PVP @ PVP)) - 0.5 * (
+                        tfim_matrices.hc((PVQ1 * EGM_12) @ Q1VP @ (PVQ1 * EGM_11) @ Q1VP)) - 1. * (tfim_matrices.hc((PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_12.T * Q1VP) @ PVP)) + fourth_order_last_term_single(a, basis, Jij, GS_indices, ES_1_indices, ES_2_indices, N, h_z)
+
+                # build Pauli matrices
+                sigma_z_a = sigma_z_0(a, GS_indices, basis)
+
+                # effective Hamiltonian under longitudinal field
+
+                H1 = H_app_4th(h_x, H_0 - h_z * sigma_z_a, H_app_1, H_app_2, H_app_3, H_app_4)
+                H2 = H_app_4th(h_x, H_0 - 2. * h_z * sigma_z_a, H_app_1, H_app_2, H_app_3, H_app_4)
+                # create new weighted adj_matrix (decoupled GS manifold)
+                nodes = S.nodes()
+                num_nodes = len(nodes)
+                decoupled1 = np.zeros((num_nodes, num_nodes))
+                decoupled2 = np.zeros((num_nodes, num_nodes))
+                for p, node_index_1 in enumerate(nodes):
+                    for q, node_index_2 in enumerate(nodes):
+                        decoupled1[p, q] = H1[node_index_1, node_index_2]
+                        decoupled2[p, q] = H2[node_index_1, node_index_2]
+
+                # calculating susceptibility
+                E1 = eigh(decoupled1, eigvals_only = True)[0]
+                E2 = eigh(decoupled2, eigvals_only = True)[0]
+                order_param = (E2 - 4. * E1 + 3. * E0) / (-2. * h_z)
+                order_param_matrix[a] = order_param
+                chi_aa = 2 * (E2 - 2. * E1 + E0) / (2 * h_z ** 2.)
+                chi_aa_matrix[a] = chi_aa
+
+                print('chi_aa ', a, 'completed')
+
+
+            # calculate chi_ab
+            chi_ab_matrix = np.zeros((lattice.N, lattice.N))
+            for a in range(lattice.N):
+                for b in range(a + 1, lattice.N, 1):
+                    '''
+                    recalculate effective Hamiltonian as the longitudinal field has caused Ising energy splitting
+                    '''
+                    # energy_gap_matrix_12 (EGM) denotes 1/(E_0-QH_0Q)^2 from Q1 to Q1
+                    EGM_12 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_1_indices, 2, h_z)
+                    EGM_13 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_1_indices, 3, h_z)
+                    EGM_11 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_1_indices, 1, h_z)
+                    EGM_21 = energy_gap_longitudinal_2(a, b, basis, Jij, GS_indices, ES_2_indices, 1, h_z)
+
+                    # Start building Hamiltonians
+
+                    H_0 = H_app_0(GS_energy, GS_indices)
+
+                    H_app_1 = PVP
+
+                    H_app_2 = (PVQ1 * EGM_11) @ Q1VP
+
+                    H_app_3 = -0.5 * (PVP @ (PVQ1 * EGM_12) @ Q1VP + np.transpose(
+                    PVP @ (PVQ1 * EGM_12) @ Q1VP)) + (PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_11.T * Q1VP)
+
+                    H_app_4 = 0.5 * (tfim_matrices.hc((PVQ1 * EGM_13) @ Q1VP @ PVP @ PVP)) - 0.5 * (
+                        tfim_matrices.hc((PVQ1 * EGM_12) @ Q1VP @ (PVQ1 * EGM_11) @ Q1VP)) - 1. * (tfim_matrices.hc((PVQ1 * EGM_11) @ Q1VQ1 @ (EGM_12.T * Q1VP) @ PVP)) + fourth_order_last_term_double(a, b, basis, Jij, GS_indices, ES_1_indices, ES_2_indices, N, h_z)
+                    # build Pauli matrices
+                    sigma_z_a = sigma_z_0(a, GS_indices, basis)
+                    sigma_z_b = sigma_z_0(b, GS_indices, basis)
+
+                    # calculating suscepbility
+                    H1 = H_app_4th(h_x, H_0 - h_z * (np.diag(sigma_z_a + sigma_z_b)), H_app_1, H_app_2, H_app_3, H_app_4)
+                    H2 = H_app_4th(h_x, H_0 - 2. * h_z * (np.diag(sigma_z_a + sigma_z_b)), H_app_1, H_app_2, H_app_3, H_app_4)
+
+                    # create new weighted adj_matrix (decoupled GS manifold)
+                    nodes = S.nodes()
+                    num_nodes = len(nodes)
+                    decoupled1 = np.zeros((num_nodes, num_nodes))
+                    decoupled2 = np.zeros((num_nodes, num_nodes))
+                    for p, node_index_1 in enumerate(nodes):
+                        for q, node_index_2 in enumerate(nodes):
+                            decoupled1[p, q] = H1[node_index_1, node_index_2]
+                            decoupled2[p, q] = H2[node_index_1, node_index_2]
+                    E1 = eigh(H1, eigvals_only = True)[0]
+                    E2 = eigh(H2, eigvals_only = True)[0]
+                    chi_ab = (E2 - 2. * E1 + E0) / (2 * (h_z ** 2.)) - 0.5 * (chi_aa_matrix[a] + chi_aa_matrix[b])
+                    chi_ab_matrix[a, b] = chi_ab
+                    chi_ab_matrix[b, a] = chi_ab
+
+                    print('chi_ab ',  a, b, 'completed')
+            # adding the diagonal elements
+            for c in range(lattice.N):
+                chi_ab_matrix[c, c] = chi_aa_matrix[c]
+
+            print('h_x = ', h_x, 'completed')
+
+            chi, order_param = np.sum(np.power(chi_ab_matrix, 2.)), abs(np.sum(order_param_matrix))
+            chi_arr[l] = chi
+            order_param_arr[l] = order_param
+
+        chi_arr_all.append(chi_arr)
+        order_param_all.append(order_param_arr)
+
+    chi_arr_ave = np.mean(chi_arr_all, axis = 0)
+    order_param_ave = np.mean(order_param_all, axis = 0)
+
+    return chi_arr_all, order_param_all, chi_arr_ave, order_param_ave
+
+def is_connected(basis, Jij, GS_indices, GS_energy, N):
+    '''
+    draft function: lacking computational efficiency, but checks if the ground manifold is connected at fourth order perturbation theory
+    '''
+    # Building block matrices
+    ES_1_indices = tfim_matrices.Hamming_set(basis, GS_indices, N, GS_indices)
+    ES_2_indices = tfim_matrices.Hamming_set(basis, ES_1_indices, N, GS_indices)
+
+    # Building blocks matrices
+    PVP = tfim_matrices.PVP(basis, GS_indices, N)
+    PVQ1 = tfim_matrices.PVQ_1(basis, GS_indices, ES_1_indices, N)
+    Q1VP = np.transpose(PVQ1)
+    Q1VQ1 = tfim_matrices.Q_1VQ_1(basis, ES_1_indices, GS_indices, N)
+    Q1VQ2 = tfim_matrices.Q_1VQ_2(basis, ES_2_indices, ES_1_indices, GS_indices, N)
+    Q2VQ1 = np.transpose(Q1VQ2)
+
+    # energy_gap_matrix_12 (EGM) denotes 1/(E_0-QH_0Q)^2 from Q1 to Q1
+    EGM_12 = tfim_matrices.energy_gap(basis, Jij, ES_1_indices, GS_energy, 2)
+    EGM_13 = tfim_matrices.energy_gap(basis, Jij, ES_1_indices, GS_energy, 3)
+    EGM_11 = tfim_matrices.energy_gap(basis, Jij, ES_1_indices, GS_energy, 1)
+    EGM_21 = tfim_matrices.energy_gap(basis, Jij, ES_2_indices, GS_energy, 1)
+
+    # Start building Hamiltonians
+
+    H_0 = H_app_0(GS_energy, GS_indices)
+
+    H_app_1 = PVP
+
+    H_app_2 = PVQ1 @ EGM_11 @ Q1VP
+
+    H_app_3 = -0.5 * (PVP @ PVQ1 @ EGM_12 @ Q1VP + np.transpose(
+        PVP @ PVQ1 @ EGM_12 @ Q1VP)) + PVQ1 @ EGM_11 @ Q1VQ1 @ EGM_11 @ Q1VP
+
+    H_app_4 = 0.5 * (tfim_matrices.hc(PVQ1 @ EGM_13 @ Q1VP @ PVP @ PVP)) - 0.5 * (
+        tfim_matrices.hc(PVQ1 @ EGM_12 @ Q1VP @ PVQ1 @ EGM_11 @ Q1VP)) - 1. * (
+                  tfim_matrices.hc(PVQ1 @ EGM_11 @ Q1VQ1 @ EGM_12 @ Q1VP @ PVP)) + 1. * (
+                          PVQ1 @ EGM_11 @ Q1VQ2 @ EGM_21 @ Q2VQ1 @ EGM_11 @ Q1VP)
+
+    # construct connectivity matrix
+    conn_matrix = H_0 + H_app_1 + H_app_2 + H_app_3 + H_app_4
+    adj_matrix = np.zeros(np.shape(conn_matrix))
+    for m in range(len(GS_indices)):
+        for n in range(len(GS_indices)):
+            if conn_matrix[m, n] != 0.:
+                adj_matrix[m, n] = 1
+    G = nx.from_numpy_matrix(adj_matrix)
+    connectivity = nx.is_connected(G)
+    print("number of ground states: ", len(GS_indices), 'connected:', connectivity)
+
+    return connectivity

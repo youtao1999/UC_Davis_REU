@@ -39,7 +39,7 @@ def PVP(basis, GS_indices, N):
             basis.flip(state,i)
     return PVP
 
-def PVQ_1(basis, Jij, GS_indices, ES_1_indices, N, GS_energy):
+def PVQ_1(basis, GS_indices, ES_1_indices, N):
     # Construct PVQ matrix
     PVQ = np.zeros((len(GS_indices), len(ES_1_indices)))
     for column, ES_ket_index in enumerate(ES_1_indices):
@@ -103,7 +103,7 @@ def Hamming_set(basis, input_state_indices, N, GS_indices):
     np.sort(Hamming_set)
     return np.unique(Hamming_set)
 
-def energy_gap(basis, Jij, input_state_indices, N, GS_energy, exponent):
+def energy_gap(basis, Jij, input_state_indices, GS_energy, exponent):
     # Construct energy gap as a diagonal matrix
     # Input_state_indices is a 1D NumPy array of state indices that are a certain number of Hamming distances away from GS_indices: Q_1, Q_2... etc
     energy_gap_matrix = np.zeros((len(input_state_indices), len(input_state_indices)))
